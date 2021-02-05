@@ -111,11 +111,42 @@ function parse_inertia(::Type{T}, xml_inertial::XMLElement, frame::CartesianFram
     transform(inertia, Transform3D(urdf_frame, frame, pose...))
 end
 
+function parse_collision(::Type{T}, xml_collision::XMLElement, frame::CartesianFrame3D) where {T}
+    urdf_frame = CartesianFrame3D("collision urdf helper")
+    xml_geometry = find_element(xml_collision, "geometry")
+
+    xml_cyl = find_element(xml_geometry,"cylinder")
+    xml_box = find_element(xml_geometry,"box")
+    xml_sphere = find_element(xml_geometry,"sphere")
+
+    # GET SHAPE BY doing find_element() for all 3 shape types
+    if xml_cyl!=nothing
+        shape = "cylinder"
+        length = parse(T,attribute(xml_cyl, "length"))
+        radius = parse(T,attribute(xml_cyl, "radius"))
+    elseif xml_box!=nothing
+        shape = "box"
+        length = parse(T,attribute(xml_box,"size"))
+        radius = convert(T,0)       
+    elseif xml_sphere!=nothing
+        shape = "sphere"
+        length = convert(T,0)   
+        radius = parse(T,attribute(xml_sphere,"radius"))
+    else
+        println("meshes not accepted at this time")
+    end
+    pose = parse_pose(T, find_element(xml_collision, "origin"))
+    transform = Transform3D(urdf_frame, frame, pose...)
+    collision = CollisionGeom(shape,length,radius,transform)    
+end
+
 function parse_body(::Type{T}, xml_link::XMLElement, frame::CartesianFrame3D = CartesianFrame3D(attribute(xml_link, "name"))) where {T}
     xml_inertial = find_element(xml_link, "inertial")
-    inertia = xml_inertial == nothing ? zero(SpatialInertia{T}, frame) : parse_inertia(T, xml_inertial, frame)
+    xml_collision = find_element(xml_link, "collision") # Julia A
+    inertia = xml_inertial === nothing ? zero(SpatialInertia{T}, frame) : parse_inertia(T, xml_inertial, frame)
+    collision = xml_collision === nothing ? CollisionGeom("none",0,0,[one(Transform3D{T}, frame)]) : parse_collision(T, xml_collision, frame)    
     linkname = attribute(xml_link, "name") # TODO: make sure link name is unique
-    RigidBody(linkname, inertia)
+    RigidBody(linkname, inertia, collision)
 end
 
 function parse_root_link(mechanism::Mechanism{T}, xml_link::XMLElement, root_joint_type::JointType{T}=Fixed{T}()) where {T}
